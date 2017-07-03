@@ -8,15 +8,19 @@ import urllib.request
 from subprocess import call
 
 
+file_path = os.path.dirname(os.path.realpath(__file__))
+
+
 def notify(header, body):
-    call(['notify-send',
+    call(['/usr/bin/notify-send',
           '--expire-time=3',
-          '--icon={}/icon.gif'.format(os.getcwd()),
+          '--icon={}/icon.gif'.format(file_path),
           header, body])
 
 
 def read_credentials(filename='.credentials'):
-    contents = open(filename, 'r').read().strip().split('\n')
+    contents = (open(file_path + '/' + filename, 'r')
+                .read().strip().split('\n'))
     return {
         'server': contents[0],
         'email': contents[1],
@@ -32,12 +36,14 @@ def connect(credentials):
 
 
 def get_ignored_messages(filename='.ignore'):
-    contents = [x for x in open(filename, 'r').read().split('\n') if x]
+    contents = [x for x in
+                open(file_path + '/' + filename, 'r').read().split('\n')
+                if x]
     return set(map(int, contents))
 
 
 def ignore_message(index, filename='.ignore'):
-    with open(filename, 'a') as file:
+    with open(file_path + '/' + filename, 'a') as file:
         file.write('{}\n'.format(index))
 
 
