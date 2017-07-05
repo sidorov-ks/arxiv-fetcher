@@ -13,7 +13,7 @@ LOCKFILE = '#lock#'
 
 
 def notify(header, body):
-    call(['/usr/bin/notify-send',
+    call(['notify-send',
           '--expire-time=3',
           '--icon={}/icon.gif'.format(file_path),
           header, body])
@@ -106,12 +106,14 @@ def fetch_paper_data(conn):
                 all_data[key].append(val)
         all_data[key] = (subjects[key], all_data[key])
         uids.append(str(key))
-    notify(
-        'ArXiv scraper',
-        'Adding mails with uids {} to task list'.format(
-            ', '.join(uids)
+
+    if uids:
+        notify(
+            'ArXiv scraper',
+            'Adding mails with uids {} to task list'.format(
+                ', '.join(uids)
+            )
         )
-    )
     return all_data
 
 
