@@ -9,6 +9,7 @@ from subprocess import call
 
 
 file_path = os.path.dirname(os.path.realpath(__file__))
+LOCKFILE = '#lock#'
 
 
 def notify(header, body):
@@ -44,18 +45,18 @@ def get_ignored_messages(filename='.ignore'):
 
 def ignore_message(index, filename='.ignore'):
     with open(file_path + '/' + filename, 'a') as file:
-        file.write('{}\n'.format(index))
+        file.write('\n{}'.format(index))
 
 
 def read_all_messages(conn):
     ignored = get_ignored_messages()
-    message_texts = dict()
-    _, mail_ids = conn.search(None, 'ALL')
-    mail_ids = mail_ids[0].split()
-    for idx in reversed(mail_ids):
+    message_texts, subjects = dict(), dict()
+    _, mail_uids = conn.uid('search', None, 'ALL')
+    mail_uids = mail_uids[0].split()
+    for idx in reversed(mail_uids):
         if int(idx) in ignored:
             continue
-        typ, data = conn.fetch(idx, '(RFC822)')
+        typ, data = conn.uid('fetch', idx, '(RFC822)')
         for response_part in data:
             if isinstance(response_part, tuple):
                 msg = email.message_from_string(
@@ -64,8 +65,11 @@ def read_all_messages(conn):
                 email_from = msg['from']
                 if email_from.lower().startswith('no-reply@arxiv.org'):
                     message_texts[int(idx)] = msg.get_payload()
+                    subjects[int(idx)] = email_subject
+                else:
+                    ignore_message(int(idx))
                 time.sleep(3)
-    return message_texts
+    return message_texts, subjects
 
 
 def extract_texts(text_dict):
@@ -89,28 +93,36 @@ def parse_text(text):
 
 
 def fetch_paper_data(conn):
-    message_texts = read_all_messages(conn)
+    message_texts, subjects = read_all_messages(conn)
     message_texts = extract_texts(message_texts)
     all_data = dict()
+    uids = list()
     for key in message_texts:
-        notify('ArXiv scraper', 'Adding mail {} to task list'.format(key))
         all_texts = message_texts[key]
         all_data[key] = list()
         for text in all_texts:
             val = parse_text(text)
             if val:
                 all_data[key].append(val)
+        all_data[key] = (subjects[key], all_data[key])
+        uids.append(str(key))
+    notify(
+        'ArXiv scraper',
+        'Adding mails with uids {} to task list'.format(
+            ', '.join(uids)
+        )
+    )
     return all_data
 
 
 def save_papers(data):
     root_path = os.path.expanduser('~/Papers')
     for key in data:
-        path = root_path + '/' + str(key)
-        mail_data = data[key]
+        subj, mail_data = data[key]
+        path = root_path + '/' + str(key) + ' ({})'.format(subj)
         notify(
             'ArXiv scraper',
-            'Downloading mail {} to {}'.format(key, path))
+            'Downloading mail with uid={} to {}'.format(key, path))
         for name, abstract, abs_link in mail_data:
             paper_path = path + '/' + name
             os.makedirs(paper_path, exist_ok=True)
@@ -122,16 +134,41 @@ def save_papers(data):
             time.sleep(15)
         notify(
             'ArXiv scraper',
-            'Saved mail {} to {}'.format(key, path))
+            'Saved mail with uid={} to {}'.format(key, path))
         ignore_message(key)
 
 
+def has_lock():
+    return LOCKFILE in os.listdir(file_path)
+
+
+def set_lock():
+    with open(file_path + '/' + LOCKFILE, 'w') as lockfile:
+        lockfile.write(str())
+
+
+def unset_lock():
+    try:
+        os.remove(file_path + '/' + LOCKFILE)
+    except Exception as ex:
+        return
+
 if __name__ == '__main__':
-    notify(
-        'ArXiv scraper',
-        'Running auto-scraper')
-    data = fetch_paper_data(connect(read_credentials()))
-    save_papers(data)
-    notify(
-        'ArXiv scraper',
-        'Finished running auto-scraper')
+    if not has_lock():
+        set_lock()
+
+        try:
+            notify(
+                'ArXiv scraper',
+                'Running auto-scraper')
+            data = fetch_paper_data(connect(read_credentials()))
+            save_papers(data)
+            notify(
+                'ArXiv scraper',
+                'Finished running auto-scraper')
+        finally:
+            unset_lock()
+
+    else:
+        notify('ArXiv scraper',
+               'Another instance of scraper is already running')
