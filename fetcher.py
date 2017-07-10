@@ -10,14 +10,41 @@ from subprocess import call
 
 
 file_path = os.path.dirname(os.path.realpath(__file__))
-LOCKFILE = '#lock#'
 
 
-def notify(header, body):
+def _(rel_path):
+    return '{}/{}'.format(file_path, rel_path)
+
+
+def notify(body, urgency='normal'):
+    print(body)
     call(['notify-send',
           '--expire-time=3',
           '--icon={}/icon.gif'.format(file_path),
-          header, body])
+          '-u', urgency,
+          'Arxiv mail scraper', body])
+
+
+def is_running(pid):
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return None
+    else:
+        return pid
+
+
+def write_lock(path_to_pidfile):
+    if os.path.exists(path_to_pidfile):
+        pid = int(open(path_to_pidfile).read())
+
+        if is_running(pid):
+            raise SystemExit
+        else:
+            os.remove(path_to_pidfile)
+
+        open(path_to_pidfile, 'w').write(str(os.getpid()))
+        return path_to_pidfile
 
 
 def read_credentials(filename='.credentials'):
@@ -39,13 +66,13 @@ def connect(credentials):
 
 def get_ignored_messages(filename='.ignore'):
     contents = [x for x in
-                open(file_path + '/' + filename, 'r').read().split('\n')
+                open(_(filename), 'r').read().split('\n')
                 if x]
     return set(map(int, contents))
 
 
 def ignore_message(index, filename='.ignore'):
-    with open(file_path + '/' + filename, 'a') as file:
+    with open(_(filename), 'a') as file:
         file.write('\n{}'.format(index))
 
 
@@ -71,8 +98,8 @@ def read_all_messages(conn):
                         raw_msg.decode(detector.result['encoding']))
                 except:
                     notify(
-                        'ArXiv fetcher',
-                        'Failed to read email with uid={}'.format(idx)
+                        'Failed to read email with uid={}'.format(idx),
+                        urgency='critical'
                     )
                 email_subject = msg['subject']
                 email_from = msg['from']
@@ -122,7 +149,6 @@ def fetch_paper_data(conn):
 
     if uids:
         notify(
-            'ArXiv scraper',
             'Adding mails with uids {} to task list'.format(
                 ', '.join(uids)
             )
@@ -136,8 +162,8 @@ def save_papers(data):
         subj, mail_data = data[key]
         path = root_path + '/' + str(key) + ' ({})'.format(subj)
         notify(
-            'ArXiv scraper',
-            'Downloading mail with uid={} to {}'.format(key, path))
+            'Downloading mail with uid={} to {}'.format(key, path)
+        )
         for name, abstract, abs_link in mail_data:
             paper_path = path + '/' + name
             os.makedirs(paper_path, exist_ok=True)
@@ -148,42 +174,26 @@ def save_papers(data):
             # Respect robots.txt
             time.sleep(15)
         notify(
-            'ArXiv scraper',
-            'Saved mail with uid={} to {}'.format(key, path))
+            'Saved mail with uid={} to {}'.format(key, path)
+        )
         ignore_message(key)
 
 
-def has_lock():
-    return LOCKFILE in os.listdir(file_path)
-
-
-def set_lock():
-    with open(file_path + '/' + LOCKFILE, 'w') as lockfile:
-        lockfile.write(str())
-
-
-def unset_lock():
-    try:
-        os.remove(file_path + '/' + LOCKFILE)
-    except Exception as ex:
-        return
-
 if __name__ == '__main__':
-    if not has_lock():
-        set_lock()
-
-        try:
-            notify(
-                'ArXiv scraper',
-                'Running auto-scraper')
-            data = fetch_paper_data(connect(read_credentials()))
-            save_papers(data)
-            notify(
-                'ArXiv scraper',
-                'Finished running auto-scraper')
-        finally:
-            unset_lock()
-
-    else:
-        notify('ArXiv scraper',
-               'Another instance of scraper is already running')
+    write_lock('/tmp/arxiv-mail-reader.lock')
+    try:
+        notify(
+            'Running auto-scraper'
+        )
+        data = fetch_paper_data(connect(read_credentials()))
+        save_papers(data)
+        notify(
+            'Finished running auto-scraper'
+        )
+    except Exception as ex:
+        notify(
+            ('An unknown error occurred while running scraper. ' +
+             'See logfile for more details.'),
+            urgency='critical'
+        )
+        raise ex
