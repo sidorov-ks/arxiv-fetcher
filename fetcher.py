@@ -5,6 +5,7 @@ import time
 import re
 import os
 import urllib.request
+from chardet import UniversalDetector
 from subprocess import call
 
 
@@ -59,8 +60,20 @@ def read_all_messages(conn):
         typ, data = conn.uid('fetch', idx, '(RFC822)')
         for response_part in data:
             if isinstance(response_part, tuple):
-                msg = email.message_from_string(
-                    response_part[1].decode('utf-8'))
+                try:
+                    detector = UniversalDetector()
+                    raw_msg = response_part[1]
+
+                    detector.feed(raw_msg)
+                    detector.close()
+
+                    msg = email.message_from_string(
+                        raw_msg.decode(detector.result['encoding']))
+                except:
+                    notify(
+                        'ArXiv fetcher',
+                        'Failed to read email with uid={}'.format(idx)
+                    )
                 email_subject = msg['subject']
                 email_from = msg['from']
                 if email_from.lower().startswith('no-reply@arxiv.org'):
